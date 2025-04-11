@@ -11,20 +11,19 @@
           <button @click="switchBackend" class="switch-btn">切换到 {{ useRustBackend ? 'Node.js' : 'Rust' }}</button>
         </div>
       </div>
-    </div>
-    <RadarForm v-if="showRadarForm" @close="showRadarForm = false" @save="saveRadar" />
-    <div v-if="alertMessage" class="alert-message">
-      <div class="alert-content">
-        <h3>预警通知</h3>
-        <p>{{ alertMessage }}</p>
-        <button @click="alertMessage = ''" class="close-btn">关闭</button>
+      <div v-if="alertMessage" class="alert-popup">
+        <div class="alert-popup-content">
+          <div class="alert-icon">⚠️</div>
+          <div class="alert-text">{{ alertMessage }}</div>
+        </div>
       </div>
     </div>
+    <RadarForm v-if="showRadarForm" @close="showRadarForm = false" @save="saveRadar" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { useUavStore, useRadarStore } from '../store'
 import RadarForm from './RadarForm.vue'
@@ -42,6 +41,9 @@ const showRadarForm = ref(false)
 const alertMessage = ref('')
 const isConnected = ref(false)
 const useRustBackend = ref(false) // 是否使用Rust后端
+
+// 告警信息自动消失定时器
+let alertTimer: number | null = null
 
 // 存储
 const uavStore = useUavStore()
@@ -67,7 +69,26 @@ onUnmounted(() => {
     viewer.destroy()
     viewer = null
   }
+  clearAlertTimer()
 })
+
+// 监视告警信息变化
+watch(alertMessage, (newVal) => {
+  if (newVal) {
+    clearAlertTimer()
+    // 设置8秒后自动清除告警信息
+    alertTimer = window.setTimeout(() => {
+      alertMessage.value = ''
+    }, 8000)
+  }
+})
+
+function clearAlertTimer() {
+  if (alertTimer) {
+    clearTimeout(alertTimer)
+    alertTimer = null
+  }
+}
 
 function initCesium() {
   if (!cesiumContainer.value) {
@@ -300,6 +321,7 @@ function checkUavInRadarRange(uav: any) {
     
     // 如果无人机在雷达范围内且标记为危险
     if (distance <= radar.radius && uav.isDangerous) {
+      // 设置告警信息，会自动触发watch
       alertMessage.value = `危险无人机 ${uav.id.substring(0, 6)} 已进入 ${radar.name} 雷达范围!`
     }
   })
@@ -411,30 +433,37 @@ function switchBackend() {
   background-color: #2ecc71;
 }
 
-.alert-message {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+.alert-popup {
+  margin-top: 10px;
+  animation: fadeInOut 8s ease-in-out;
+  max-width: 300px;
+}
+
+.alert-popup-content {
+  background-color: rgba(231, 76, 60, 0.9);
+  color: white;
+  padding: 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
   display: flex;
-  justify-content: center;
   align-items: center;
-  z-index: 9999;
+  gap: 10px;
 }
 
-.alert-content {
-  background-color: white;
-  padding: 20px;
-  border-radius: 8px;
-  max-width: 400px;
-  text-align: center;
+.alert-icon {
+  font-size: 24px;
 }
 
-.alert-content h3 {
-  color: #e74c3c;
-  margin-top: 0;
+.alert-text {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateY(-10px); }
+  10% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .close-btn {
