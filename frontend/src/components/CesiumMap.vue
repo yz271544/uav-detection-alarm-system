@@ -149,7 +149,7 @@ function initSocket() {
       isConnected.value = true
     })
     
-    socket.on('connect_error', (error) => {
+    socket.on('connect_error', (error: Error) => {
       console.error('连接错误:', error.message || error)
       isConnected.value = false
     })
