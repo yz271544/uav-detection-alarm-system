@@ -6,6 +6,10 @@
       <div class="status-info">
         <span>连接状态: {{ isConnected ? '已连接' : '未连接' }}</span>
         <span>无人机数量: {{ uavStore.uavs.length }}</span>
+        <div class="backend-switch">
+          <span>后端: {{ useRustBackend ? 'Rust' : 'Node.js' }}</span>
+          <button @click="switchBackend" class="switch-btn">切换到 {{ useRustBackend ? 'Node.js' : 'Rust' }}</button>
+        </div>
       </div>
     </div>
     <RadarForm v-if="showRadarForm" @close="showRadarForm = false" @save="saveRadar" />
@@ -25,6 +29,7 @@ import * as Cesium from 'cesium'
 import { useUavStore, useRadarStore } from '../store'
 import RadarForm from './RadarForm.vue'
 import { io } from 'socket.io-client'
+import { createRustSocketClient } from '../utils/rust-backend-adapter'
 
 // Cesium相关
 const cesiumContainer = ref<HTMLElement | null>(null)
@@ -36,6 +41,7 @@ let radarEntities: Record<string, Cesium.Entity> = {}
 const showRadarForm = ref(false)
 const alertMessage = ref('')
 const isConnected = ref(false)
+const useRustBackend = ref(false) // 是否使用Rust后端
 
 // 存储
 const uavStore = useUavStore()
@@ -100,24 +106,30 @@ function initCesium() {
 function initSocket() {
   console.log('初始化WebSocket连接')
   try {
-    // 使用更详细的连接选项
-    socket = io('/', {
-      path: '/socket.io',
-      transports: ['websocket'], 
-      reconnection: true,
-      reconnectionAttempts: 10,   // 增加重连次数
-      reconnectionDelay: 1000,   
-      timeout: 10000,            // 增加连接超时时间
-      autoConnect: true
-    });
+    // 根据设置选择后端
+    if (useRustBackend.value) {
+      console.log('使用Rust后端')
+      socket = createRustSocketClient();
+    } else {
+      console.log('使用Node.js后端')
+      socket = io('/', {
+        path: '/socket.io',
+        transports: ['websocket'], 
+        reconnection: true,
+        reconnectionAttempts: 10,   // 增加重连次数
+        reconnectionDelay: 1000,   
+        timeout: 10000,            // 增加连接超时时间
+        autoConnect: true
+      });
+    }
     
     socket.on('connect', () => {
-      console.log('已连接到后端服务器，连接ID:', socket.id)
+      console.log('已连接到后端服务器，连接ID:', socket.id || 'Rust客户端')
       isConnected.value = true
     })
     
     socket.on('connect_error', (error) => {
-      console.error('连接错误:', error.message)
+      console.error('连接错误:', error.message || error)
       isConnected.value = false
     })
     
@@ -127,7 +139,7 @@ function initSocket() {
     })
     
     socket.on('uav-update', (data: any) => {
-      console.log('收到无人机更新:', data)
+      console.log('收到无人机更新:', data, '危险状态:', data.isDangerous, '原始dangerous:', (data as any).is_dangerous)
       uavStore.updateUav(data)
       updateUavEntities()
       checkUavInRadarRange(data)
@@ -322,88 +334,102 @@ function saveRadar(radar: any) {
   showRadarForm.value = false
   updateRadars()
 }
+
+function switchBackend() {
+  if (socket) {
+    socket.disconnect();
+  }
+  useRustBackend.value = !useRustBackend.value;
+  initSocket();
+}
 </script>
 
 <style scoped>
 .cesium-container {
   width: 100%;
-  height: 100%;
+  height: 100vh;
   position: relative;
 }
 
 .cesium-viewer {
   width: 100%;
   height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
 }
 
 .left-controls {
   position: absolute;
   top: 10px;
   left: 10px;
-  z-index: 10;
+  z-index: 999;
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.right-controls {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.status-info {
-  background-color: rgba(255, 255, 255, 0.8);
-  padding: 8px;
-  border-radius: 4px;
-  font-size: 14px;
-  display: flex;
-  flex-direction: column;
 }
 
 .map-btn {
-  background-color: #2c3e50;
+  background-color: #3498db;
   color: white;
   border: none;
-  padding: 8px 16px;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.map-btn:hover {
+  background-color: #2980b9;
+}
+
+.status-info {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.backend-switch {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  gap: 5px;
+}
+
+.switch-btn {
+  background-color: #27ae60;
+  color: white;
+  border: none;
+  padding: 5px 10px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
 }
 
-.map-btn:hover {
-  background-color: #1e2b3a;
+.switch-btn:hover {
+  background-color: #2ecc71;
 }
 
 .alert-message {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
+  width: 100%;
+  height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 100;
+  align-items: center;
+  z-index: 9999;
 }
 
 .alert-content {
   background-color: white;
   padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
   max-width: 400px;
-  width: 100%;
+  text-align: center;
 }
 
 .alert-content h3 {
@@ -419,5 +445,9 @@ function saveRadar(radar: any) {
   border-radius: 4px;
   cursor: pointer;
   margin-top: 10px;
+}
+
+.close-btn:hover {
+  background-color: #c0392b;
 }
 </style> 
